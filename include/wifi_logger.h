@@ -24,7 +24,6 @@ extern "C" {
 #define wifi_log_v(TAG, fmt, ...) generate_log_message(ESP_LOG_VERBOSE, TAG, __LINE__, __func__, fmt, __VA_ARGS__);
 
 esp_err_t init_queue(void);
-void init_wifi(void);
 esp_err_t send_to_queue(char* log_message);
 char* receive_from_queue(void);
 void generate_log_message(esp_log_level_t level, const char *TAG, int line, const char *func, const char *fmt, ...);

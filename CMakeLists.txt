@@ -10,4 +10,4 @@ endif()
 
 idf_component_register(SRCS "${srcs}"
                        INCLUDE_DIRS "include"
-                       REQUIRES protocol_examples_common nvs_flash esp_websocket_client)
+                       REQUIRES nvs_flash esp_websocket_client)

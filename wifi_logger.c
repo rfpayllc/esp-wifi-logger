@@ -25,18 +25,6 @@ esp_err_t init_queue(void)
 }
 
 /**
- * @brief Initialises and connects to wifi
- **/
-void init_wifi(void)
-{
-	ESP_ERROR_CHECK(nvs_flash_init());
-	ESP_ERROR_CHECK(esp_netif_init());
-	ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-	ESP_ERROR_CHECK(example_connect());
-}
-
-/**
  * @brief Sends log message to message queue
  * 
  * @param log_message log message to be sent to the queue
@@ -186,7 +174,6 @@ int system_log_message_route(const char* fmt, va_list tag)
  */
 void start_wifi_logger(void)
 {
-	init_wifi();
 	ESP_ERROR_CHECK(init_queue());
 
 #ifdef CONFIG_ROUTE_ESP_IDF_API_LOGS_TO_WIFI
