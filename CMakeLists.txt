@@ -1,13 +1,16 @@
 set(srcs "wifi_logger.c" "utils.cpp")
 
-if(CONFIG_TRANSPORT_PROTOCOL_TCP)
+set(priv_requires "")
+
+if(CONFIG_LOGGING_SERVER_TRANSPORT_PROTOCOL_TCP)
     list(APPEND srcs "tcp_handler.c")
-elseif(CONFIG_TRANSPORT_PROTOCOL_UDP)
+elseif(CONFIG_LOGGING_SERVER_TRANSPORT_PROTOCOL_UDP)
     list(APPEND srcs "udp_handler.c")
-elseif(CONFIG_TRANSPORT_PROTOCOL_WEBSOCKET)
+elseif(CONFIG_LOGGING_SERVER_TRANSPORT_PROTOCOL_WEBSOCKET)
     list(APPEND srcs "websocket_handler.c")
+    list(APPEND priv_requires "esp_websocket_client")
 endif()
 
 idf_component_register(SRCS "${srcs}"
                        INCLUDE_DIRS "include"
-                       REQUIRES nvs_flash esp_websocket_client)
+                       PRIV_REQUIRES "${priv_requires}")
