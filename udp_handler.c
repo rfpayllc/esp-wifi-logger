@@ -81,14 +81,15 @@ bool is_logging_udp_connected(struct logger_udp_network_data* nm) {
  * 
  * @param nm A pointer to logger_udp_network_data struct
  * @param payload char array which contains data to be sent
- * @return int - returns -1 if sending failed, number of bytes sent if successfully sent the data
+ * @param len_sent int (out parm) - returns -1 if sending failed, number of bytes sent if successfully sent the data
  **/
-int send_udp_data(struct logger_udp_network_data* nm, char* payload)
+void send_udp_data(struct logger_udp_network_data* nm, char* payload, int* len_sent)
 {
-	int err = sendto(nm->sock, payload, strlen(payload), 0, (struct sockaddr *)&(nm->dest_addr), sizeof(nm->dest_addr));
-	if (err < 0)
+	int len = sendto(nm->sock, payload, strlen(payload), 0, (struct sockaddr *)&(nm->dest_addr), sizeof(nm->dest_addr));
+	if (len < 0)
 	{
-        if (errno != 118) { // 118 = no network is available. we'll silently ignore it.
+        // 118 = no network is available. we'll silently ignore it to prevent spamming
+        if (errno != 118) {
             printf("%s: Error occurred during sending: errno %d", TAG, errno);
         }
 	}
@@ -97,7 +98,8 @@ int send_udp_data(struct logger_udp_network_data* nm, char* payload)
         // printf("%s: Log msg sent via UDP", TAG); // very spammy
 	}
 
-	return err;
+    if (len_sent)
+        *len_sent = len;
 }
 
 /**

@@ -266,9 +266,10 @@ bool update_udp_logging(struct logger_udp_network_data *handle, const char *host
         return false;
     }
 
-    int len = send_udp_data(handle, log_message);
+    int len_sent;
+    send_udp_data(handle, log_message, &len_sent);
     #if DEBUG_VERBOSE_LOCAL_LOGGING==1
-    printf("%s: %d %s", TAG, len, "bytes of data sent"); // spammy
+    printf("%s: %d %s", TAG, len_sent, "bytes of data sent"); // spammy
     #endif
 
     free((void *) log_message);

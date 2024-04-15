@@ -10,7 +10,7 @@ struct logger_udp_network_data;
 struct logger_udp_network_data* create_udp_network_manager_handle();
 bool is_logging_udp_connected(struct logger_udp_network_data* nm);
 bool init_udp_network_manager(struct logger_udp_network_data* nm, const char* host, int port);
-int send_udp_data(struct logger_udp_network_data* nm, char* payload);
+void send_udp_data(struct logger_udp_network_data* nm, char* payload, int* len_sent);
 char* receive_udp_data(struct logger_udp_network_data* nm);
 void close_udp_network_manager(struct logger_udp_network_data* nm);
 
