@@ -22,13 +22,23 @@
 #include "wifi_logger.h"
 
 static const char* TAG = "wifi_logger";
-static QueueHandle_t wifi_logger_queue;
+
+static bool s_wifi_logging_sending_enabled = true;
+void udp_logging_set_sending_enabled(bool sending_enabled)
+{
+    // this call is safe to call before init, but enabling has no effect unless we previously started up logging.
+    // it just enables/disabling network logging AFTER we already set everything else up.
+    s_wifi_logging_sending_enabled = sending_enabled;
+    ESP_LOGW(TAG, "udp logging state now set to: %d", s_wifi_logging_sending_enabled);
+}
+
 
 /**
  * @brief Initialises message queue
  * 
  * @return esp_err_t ESP_OK - if queue init sucessfully, ESP_FAIL - if queue init failed
  **/
+static QueueHandle_t wifi_logger_queue;
 esp_err_t init_queue(void)
 {
 	wifi_logger_queue = xQueueCreate(CONFIG_LOGGING_SERVER_MESSAGE_QUEUE_SIZE, sizeof(char*));
@@ -131,6 +141,12 @@ char* receive_from_queue(void)
  */
 void generate_log_message(esp_log_level_t level, const char *log_tag, int line, const char *func, const char *fmt, ...)
 {
+    // this function is NOT used during hooking of ESP_LOGxx() functions.
+    // it is only used as a manual call for sending msgs that should ONLY go through network logging.
+
+    if (!s_wifi_logging_sending_enabled)
+        return;
+
     const uint32_t buffer_size = CONFIG_LOGGING_SERVER_BUFFER_SIZE;
     char log_print_buffer[buffer_size];
 
@@ -196,31 +212,52 @@ int system_log_message_route(const char* fmt, va_list tag)
 {
     // TODO: optimize allocations, this is casually using/freeing a lot of memory.
 
+    // ESP_LOGx() statements call this.
+    // we perform 2 decisions:
+    // 1. do we want to send this message out over the network?
+    // 2. do we want to echo this locally
+
+    // ---------------------------
+    // STEP 1 - NETWORK SENDING
+    // ---------------------------
+
     // if we're in an interrupt, just... dont even try, forget it.
     // not sure we should even try this though.
-    bool skip = false;
-    skip |= xPortInIsrContext();
+    bool skip_network_logging = false;
+    skip_network_logging |= xPortInIsrContext();
 
     // optional...ish? skip some tasks that might cause re-entrat issues if they call for logs while we're logging (like LWIP etc)
     // for instance: "tiT" is LWIP stack. we don't want logging stuff from the TCP/IP stack caused by message from inside our sendto()
     char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
-    skip |= strcmp(cur_task, "tiT") == 0;
+    skip_network_logging |= strcmp(cur_task, "tiT") == 0;
 
-    if (!skip)
+    // finally, we'll skip if network sending is explicitly disabled
+    skip_network_logging |= !s_wifi_logging_sending_enabled;
+
+    // note: even if we're skipping sending to UDP, we need to call vprintf() below to display the log msg locally.
+    if (!skip_network_logging)
     {
         // we do want to send to UDP! let's prep.
 
         char *log_print_buffer = (char *) malloc(sizeof(char) * CONFIG_LOGGING_SERVER_BUFFER_SIZE);
         vsprintf(log_print_buffer, fmt, tag);
 
-        // send_to_queue(log_print_buffer); // original.
+        // send_to_queue(log_print_buffer); // original. (MUST FREE log_print_buffer here)
 
-        // version with mac address:
+        // or... this version prepends the mac address.
+        // note that this does an additional malloc that the queue consumer must free.
+        // note that log_print_buffer is copied into this new malloc()'d data, so, WE need to free it right after.
         send_to_queue(generate_log_message_timestamp_and_device_id(false, 0, 0, log_print_buffer));
-        free(log_print_buffer); // don't need anymore. generate_log_message_timestamp_and_device_id() does its own malloc and that is freed by Q consumer later.
+
+        // generate_log_message_timestamp_and_device_id() does an additional copy of this data, so, we should free this ourselves.
+        free(log_print_buffer);
     }
 
-    // pass along to original normal logging system now.
+    // ---------------------------
+    // STEP 2 - LOCAL ECHO
+    // ---------------------------
+
+    // pass along to original normal logging system now. (this actually just prints it to the console, normally)
 	return vprintf(fmt, tag);
 }
 

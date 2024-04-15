@@ -22,6 +22,9 @@ struct wifi_logger_config {
 bool set_wifi_logger_config(struct wifi_logger_config* config, const char* host, int port, bool route_esp_idf_api_logs_to_wifi);
 bool start_wifi_logger(struct wifi_logger_config* config);
 
+// after starting everything else up, you can use this to toggle whether logs are being sent out or not.
+void udp_logging_set_sending_enabled(bool sending_enabled);
+
 void generate_log_message(esp_log_level_t level, const char *TAG, int line, const char *func, const char *fmt, ...);
 bool is_connected(void* handle_t); // TODO: fix definition
 
