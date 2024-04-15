@@ -314,7 +314,7 @@ bool update_udp_logging(struct logger_udp_network_data *handle, const char *host
     return true;
 }
 
-void wifi_logger_task(void* param)
+_Noreturn void wifi_logger_task(void* param)
 {
     assert(param);
     struct wifi_logger_config* config = (struct wifi_logger_config*)param;
@@ -387,7 +387,7 @@ bool update_tcp_logging(struct logger_tcp_network_data *handle, const char *host
  * @brief function which handles sending of log messages to server by TCP
  * 
  */
-void wifi_logger_task()
+_Noreturn void wifi_logger_task()
 {
     struct logger_tcp_network_data* handle = create_tcp_network_manager_handle();
     const char* host = "TODO";      // TODO: get from somewhere
@@ -412,7 +412,7 @@ void wifi_logger_task()
 
 // TODO: tcp and websockets need updating for new API/structs. see UDP implementation for reference. complete this
 #if CONFIG_LOGGING_SERVER_TRANSPORT_PROTOCOL_WEBSOCKET==1
-void wifi_logger_task()
+_Noreturn void wifi_logger_task()
 {
     // TODO: update for refactored API, right now doesn't work.
 	esp_websocket_client_handle_t handle = init_websocket_network_manager();
