@@ -226,7 +226,7 @@ int system_log_message_route(const char* fmt, va_list tag)
     bool skip_network_logging = false;
     skip_network_logging |= xPortInIsrContext();
 
-    // optional...ish? skip some tasks that might cause re-entrat issues if they call for logs while we're logging (like LWIP etc)
+    // optional...ish? skip some tasks that might cause threading/contention issues if they call for logs while we're logging (like LWIP etc)
     // for instance: "tiT" is LWIP stack. we don't want logging stuff from the TCP/IP stack caused by message from inside our sendto()
     char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
     skip_network_logging |= strcmp(cur_task, "tiT") == 0;
