@@ -38,7 +38,7 @@ void udp_logging_set_sending_enabled(bool sending_enabled)
  * 
  * @return esp_err_t ESP_OK - if queue init sucessfully, ESP_FAIL - if queue init failed
  **/
-static QueueHandle_t wifi_logger_queue;
+static volatile QueueHandle_t wifi_logger_queue;
 esp_err_t init_queue(void)
 {
 	wifi_logger_queue = xQueueCreate(CONFIG_LOGGING_SERVER_MESSAGE_QUEUE_SIZE, sizeof(char*));
