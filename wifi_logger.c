@@ -21,9 +21,20 @@
 
 #include "wifi_logger.h"
 
+#include <esp_mac.h>
+
 static const char* TAG = "wifi_logger";
 
-static bool s_wifi_logging_sending_enabled = true;
+static bool s_print_device_id = true; // TODO: set from config
+
+static volatile bool s_wifi_logging_sending_enabled = true;
+static char s_device_id[18] = {}; // set to mac address at start.
+
+const char* udp_logging_get_device_id() {
+	// either the mac address, or null-terminated zero-len str
+    return s_device_id;
+}
+
 void udp_logging_set_sending_enabled(bool sending_enabled)
 {
     // this call is safe to call before init, but enabling has no effect unless we previously started up logging.
@@ -38,12 +49,12 @@ void udp_logging_set_sending_enabled(bool sending_enabled)
  * 
  * @return esp_err_t ESP_OK - if queue init sucessfully, ESP_FAIL - if queue init failed
  **/
-static volatile QueueHandle_t wifi_logger_queue;
+static volatile QueueHandle_t s_wifi_logger_queue;
 esp_err_t init_queue(void)
 {
-	wifi_logger_queue = xQueueCreate(CONFIG_LOGGING_SERVER_MESSAGE_QUEUE_SIZE, sizeof(char*));
+	s_wifi_logger_queue = xQueueCreate(CONFIG_LOGGING_SERVER_MESSAGE_QUEUE_SIZE, sizeof(char*));
 
-	if (wifi_logger_queue == NULL)
+	if (s_wifi_logger_queue == NULL)
 	{
 		ESP_LOGE(TAG, "%s", "Queue creation failed");
 		return ESP_FAIL;
@@ -59,18 +70,19 @@ esp_err_t init_queue(void)
  * @brief Sends log message to message queue
  * 
  * @param log_message log message to be sent to the queue
- * @return esp_err_t ESP_OK - if queue init sucessfully, ESP_FAIL - if queue init failed
+ * @return esp_err_t ESP_OK - if queue init successfully, ESP_FAIL - if queue init failed.
+ *							  if enqueueing is OK, consumer is responsible for free()'ing. on failure, caller must free()
  **/
 esp_err_t send_to_queue(char* log_message)
 {
     // use printf() for local logging (since ESP_LOGxxx may create a weird feedback loop since we potentially have it hooked)
 
-    if (wifi_logger_queue == NULL) {
+    if (s_wifi_logger_queue == NULL) {
         printf("wifi logger: enqueue: queue not created / configured incorrectly. please fix.\n");
         return ESP_FAIL;
     }
 
-	BaseType_t qerror = xQueueSendToBack(wifi_logger_queue, (void*)&log_message, (TickType_t) 0/portTICK_PERIOD_MS);
+	const BaseType_t qerror = xQueueSendToBack(s_wifi_logger_queue, (void*)&log_message, (TickType_t) 0/portTICK_PERIOD_MS);
 
 	if(qerror == pdPASS)
 	{
@@ -104,7 +116,7 @@ char* receive_from_queue(void)
 	// ************************* IMPORTANT *******************************************************************
 	// Timeout period is set to portMAX_DELAY, so if it doesnot receive a log message for ~50 days, config assert will fail and program will crash
 	//
-	BaseType_t qerror = xQueueReceive(wifi_logger_queue, &data, (TickType_t) portMAX_DELAY);
+	BaseType_t qerror = xQueueReceive(s_wifi_logger_queue, &data, (TickType_t) portMAX_DELAY);
 	configASSERT(qerror);
 	//
 	// *******************************************************************************************************
@@ -147,7 +159,7 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
     if (!s_wifi_logging_sending_enabled)
         return;
 
-    const uint32_t buffer_size = CONFIG_LOGGING_SERVER_BUFFER_SIZE;
+    const uint32_t buffer_size = CONFIG_LOGGING_SERVER_BUFFER_MAX_SIZE;
     char log_print_buffer[buffer_size];
 
 	memset(log_print_buffer, '\0', buffer_size);
@@ -155,7 +167,7 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
 	va_list args;
 	va_start(args, fmt);
 
-	int len = strlen(log_print_buffer);
+	const size_t len = strlen(log_print_buffer);
 
 	if (buffer_size - len > 1)
 	{
@@ -194,7 +206,9 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
 
 	// this malloc()'s a new string, stored in final_log_message
 	// someone must free this later.
-    char* final_log_message = generate_log_message_timestamp_and_device_id(true, log_level_opt, esp_log_timestamp(), log_print_buffer);
+    char* final_log_message = generate_log_message_timestamp_and_device_id(s_print_device_id, true, log_level_opt, esp_log_timestamp(), log_print_buffer);
+	if (!final_log_message)
+		return;
 
 	// ************************* IMPORTANT *******************************************************************
 	// I am mallocing a char* inside generate_log_timestamp() function situated inside util.cpp, log_print_buffer is not being pushed to queue
@@ -210,6 +224,67 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
 	//********************************************************************************************************
 }
 
+bool is_network_logging_allowed_here()
+{
+	if (!s_wifi_logging_sending_enabled)
+		return false;
+
+	// if we're inside an interrupt, absolutely forget it
+	if (xPortInIsrContext())
+		return false;
+
+	// optional...ish? skip some tasks that might cause threading/contention issues if they call for logs while we're logging (like LWIP etc)
+	// for instance: "tiT" is LWIP stack. we don't want logging stuff from the TCP/IP stack caused by message from inside our sendto()
+	const char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
+	if (strcmp(cur_task, "tiT") == 0)
+		return false;
+
+	return true;
+}
+
+void format_log_and_queue_for_send(const char* fmt, const va_list tag)
+{
+	if (!is_network_logging_allowed_here())
+		return;
+
+	// we do want to send to UDP! let's prep.
+
+	// we're going to only allow CONFIG_LOGGING_SERVER_BUFFER_MAX_SIZE-1 size strings. anything less will be cutoff
+	// remember to always free() this.
+	// Note: we COULD do this as an array declared on the stack HOWEVER, many tasks have very small stack sizes, so,
+	// we might quickly blow up their stack.  so, we'll do a malloc() here.
+	// WARNING: this many mallocs done so quickly might fragment memory quickly.
+	// we may want some kind of better approach, like a buffer pool.
+	char *log_print_buffer = malloc(sizeof(char) * CONFIG_LOGGING_SERVER_BUFFER_MAX_SIZE);
+	if (!log_print_buffer)
+		return;
+
+	vsnprintf(log_print_buffer, CONFIG_LOGGING_SERVER_BUFFER_MAX_SIZE, fmt, tag);
+	log_print_buffer[CONFIG_LOGGING_SERVER_BUFFER_MAX_SIZE - 1] = '\0';
+
+	// but, here's a version that prepends the mac address.
+	// note that this does an additional malloc that the queue consumer must free.
+	// note that log_print_buffer is copied into this new malloc()'d data, so, WE need to free it right after.
+	// SOMEONE MUST free() this string eventually.
+	char* final_log_message = generate_log_message_timestamp_and_device_id(s_print_device_id, false, 0, 0, log_print_buffer);
+
+	// generate_log_message_timestamp_and_device_id() made an additional copy
+	// of this data, so, we're done with the original message now. free it
+	free(log_print_buffer);
+	log_print_buffer = NULL;
+
+	if (!final_log_message)
+		return;
+
+	// if queued, queue consumer is responsible for free()'ing our string.
+	// if not, we need to free() it ourselves here.
+	if (send_to_queue(final_log_message) != ESP_OK)
+	{
+		free(final_log_message);
+		final_log_message = NULL;
+	}
+}
+
 /**
  * @brief route log messages generated by ESP_LOGX to the wifi logger
  * 
@@ -217,8 +292,10 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
  * @param tag arguments
  * @return int return value of vprintf
  */
-int system_log_message_route(const char* fmt, va_list tag)
+int system_log_message_route(const char* fmt, const va_list tag)
 {
+	// WARNING: REMEMBER: this can be called from multiple threads at once
+
     // note: we may want to optimize allocations or use some kind of pooled buffer, this is casually using/freeing a lot of memory.
 
     // ESP_LOGx() statements call this.
@@ -229,52 +306,14 @@ int system_log_message_route(const char* fmt, va_list tag)
     // ---------------------------
     // STEP 1 - NETWORK SENDING
     // ---------------------------
-
-    // if we're in an interrupt, just... dont even try, forget it.
-    // not sure we should even try this though.
-    bool skip_network_logging = false;
-    skip_network_logging |= xPortInIsrContext();
-
-    // optional...ish? skip some tasks that might cause threading/contention issues if they call for logs while we're logging (like LWIP etc)
-    // for instance: "tiT" is LWIP stack. we don't want logging stuff from the TCP/IP stack caused by message from inside our sendto()
-    const char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
-    skip_network_logging |= strcmp(cur_task, "tiT") == 0;
-
-    // finally, we'll skip if network sending is explicitly disabled
-    skip_network_logging |= !s_wifi_logging_sending_enabled;
-
-    // note: even if we're skipping sending to UDP, we need to call vprintf() below to display the log msg locally.
-    if (!skip_network_logging)
-    {
-        // we do want to send to UDP! let's prep.
-
-        char *log_print_buffer = malloc(sizeof(char) * CONFIG_LOGGING_SERVER_BUFFER_SIZE);
-        vsprintf(log_print_buffer, fmt, tag);
-
-    	// but, here's a version that prepends the mac address.
-    	// note that this does an additional malloc that the queue consumer must free.
-    	// note that log_print_buffer is copied into this new malloc()'d data, so, WE need to free it right after.
-    	// SOMEONE MUST free() this string eventually.
-        char* final_log_message = generate_log_message_timestamp_and_device_id(false, 0, 0, log_print_buffer);
-
-    	// generate_log_message_timestamp_and_device_id() made an additional copy of this data, so, we should free this ourselves now.
-    	free(log_print_buffer);
-    	log_print_buffer = NULL;
-
-    	// if queued, queue consumer is responsible for free()'ing our string.
-    	// if not, we need to free() it ourselves here.
-        if (send_to_queue(final_log_message) != ESP_OK)
-        {
-	        free(final_log_message);
-        	final_log_message = NULL;
-        }
-    }
+	format_log_and_queue_for_send(fmt, tag);
 
     // ---------------------------
     // STEP 2 - LOCAL ECHO
     // ---------------------------
-
+	// note: even if we're skipping sending to UDP, we can still call vprintf() below to display the log msg locally.
     // pass along to original normal logging system now. (this actually just prints it to the console, normally)
+	// basically, this is the same as the normal behavior of ESP_LOGxxx() functions
 	return vprintf(fmt, tag);
 }
 
@@ -486,14 +525,23 @@ bool set_wifi_logger_config(struct wifi_logger_config* config, const char* host,
     return true;
 }
 
+void utils_get_mac_address(char *formatted_mac_address)  // provide at least 18 byte buffer (17 chars + null) i.e. "12:45:78:90:23:56"
+{
+	uint8_t mac_address[6];
+	esp_efuse_mac_get_default(mac_address);
+	sprintf(formatted_mac_address, "%02x:%02x:%02x:%02x:%02x:%02x", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
+}
 /**
  * @brief wrapper function to start wifi logger
  * 
  */
-bool start_wifi_logger(struct wifi_logger_config* config)
+bool start_wifi_logger(const struct wifi_logger_config* config)
 {
-    if (init_queue() != ESP_OK)
-        return false;
+    if (init_queue() != ESP_OK) {
+	    return false;
+    }
+
+	utils_get_mac_address(s_device_id);
 
     // make a copy to pass in
     struct wifi_logger_config* config_copy = malloc(sizeof(struct wifi_logger_config));

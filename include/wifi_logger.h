@@ -20,7 +20,7 @@ struct wifi_logger_config {
 
 // if using websockets, port is ignored and your host line should be a URI like: "ws://192.168.0.1:1234"
 bool set_wifi_logger_config(struct wifi_logger_config* config, const char* host, int port, bool route_esp_idf_api_logs_to_wifi);
-bool start_wifi_logger(struct wifi_logger_config* config);
+bool start_wifi_logger(const struct wifi_logger_config* config);
 
 // after starting everything else up, you can use this to toggle whether logs are being sent out or not.
 void udp_logging_set_sending_enabled(bool sending_enabled);

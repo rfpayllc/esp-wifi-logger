@@ -18,15 +18,16 @@ choice LOGGING_SERVER_TRANSPORT_PROTOCOL
 endchoice
 
 config LOGGING_SERVER_MESSAGE_QUEUE_SIZE
+    help
+        "Each queue item is one line of log output. This size only matters when network is down, or, having trouble sending"
     int "Queue Size"
-    default 1000
-    help 
-        "Sets message queue size"
+    default 256
 
-config LOGGING_SERVER_BUFFER_SIZE
-    int "logger buffer size"
-    default 512
-    help 
-        "Logger buffer size"
+config LOGGING_SERVER_BUFFER_MAX_SIZE
+    int "logger buffer max size"
+    help
+        "Max #chars to store in a line of log text. beyond this, output will be truncated until next newline. Try and keep short, if possible."
+
+    default 256
         
 endmenu
