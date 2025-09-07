@@ -66,7 +66,7 @@ esp_err_t send_to_queue(char* log_message)
     // use printf() for local logging (since ESP_LOGxxx may create a weird feedback loop since we potentially have it hooked)
 
     if (wifi_logger_queue == NULL) {
-        printf("wifi logger: enqueue: queue not created / configured incorrectly. please fix.");
+        printf("wifi logger: enqueue: queue not created / configured incorrectly. please fix.\n");
         return ESP_FAIL;
     }
 
@@ -81,12 +81,12 @@ esp_err_t send_to_queue(char* log_message)
 	}
 	else if(qerror == errQUEUE_FULL)
 	{
-		printf("wifi_logger: Data not sent to Queue, Queue full");
+		printf("wifi_logger: queue full, not sending data\n");
 		return ESP_FAIL;
 	}
 	else
 	{
-        printf("wifi_logger: Unknown error");
+        printf("wifi_logger: Unknown error\n");
 		return ESP_FAIL;
 	}
 }
@@ -94,7 +94,7 @@ esp_err_t send_to_queue(char* log_message)
 /**
  * @brief Receive data from queue. Timeout is set to portMAX_DELAY, which is around 50 days (confirm from esp32 specs)
  * 
- * @return char* - returns log message received from the queue, returns NULL if error
+ * @return char* - returns log message received from the queue, returns NULL if error. CALLER MUST free() THIS STRING WHEN DONE
  **/
 char* receive_from_queue(void)
 {
@@ -192,11 +192,20 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
 		break;
 	}
 
+	// this malloc()'s a new string, stored in final_log_message
+	// someone must free this later.
+    char* final_log_message = generate_log_message_timestamp_and_device_id(true, log_level_opt, esp_log_timestamp(), log_print_buffer);
+
 	// ************************* IMPORTANT *******************************************************************
 	// I am mallocing a char* inside generate_log_timestamp() function situated inside util.cpp, log_print_buffer is not being pushed to queue
 	// The function returns the malloc'd char* and is passed to the queue
 	//
-	send_to_queue(generate_log_message_timestamp_and_device_id(true, log_level_opt, esp_log_timestamp(), log_print_buffer));
+	// the queue consumer will free() whatever str is passed to it
+	if (send_to_queue(final_log_message) != ESP_OK)
+	{
+		free(final_log_message);
+		final_log_message = NULL;
+	}
 	//
 	//********************************************************************************************************
 }
@@ -210,7 +219,7 @@ void generate_log_message(esp_log_level_t level, const char *log_tag, int line, 
  */
 int system_log_message_route(const char* fmt, va_list tag)
 {
-    // TODO: optimize allocations, this is casually using/freeing a lot of memory.
+    // note: we may want to optimize allocations or use some kind of pooled buffer, this is casually using/freeing a lot of memory.
 
     // ESP_LOGx() statements call this.
     // we perform 2 decisions:
@@ -228,7 +237,7 @@ int system_log_message_route(const char* fmt, va_list tag)
 
     // optional...ish? skip some tasks that might cause threading/contention issues if they call for logs while we're logging (like LWIP etc)
     // for instance: "tiT" is LWIP stack. we don't want logging stuff from the TCP/IP stack caused by message from inside our sendto()
-    char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
+    const char *cur_task = pcTaskGetName(xTaskGetCurrentTaskHandle());
     skip_network_logging |= strcmp(cur_task, "tiT") == 0;
 
     // finally, we'll skip if network sending is explicitly disabled
@@ -239,18 +248,26 @@ int system_log_message_route(const char* fmt, va_list tag)
     {
         // we do want to send to UDP! let's prep.
 
-        char *log_print_buffer = (char *) malloc(sizeof(char) * CONFIG_LOGGING_SERVER_BUFFER_SIZE);
+        char *log_print_buffer = malloc(sizeof(char) * CONFIG_LOGGING_SERVER_BUFFER_SIZE);
         vsprintf(log_print_buffer, fmt, tag);
 
-        // send_to_queue(log_print_buffer); // original. (MUST FREE log_print_buffer here)
+    	// but, here's a version that prepends the mac address.
+    	// note that this does an additional malloc that the queue consumer must free.
+    	// note that log_print_buffer is copied into this new malloc()'d data, so, WE need to free it right after.
+    	// SOMEONE MUST free() this string eventually.
+        char* final_log_message = generate_log_message_timestamp_and_device_id(false, 0, 0, log_print_buffer);
 
-        // or... this version prepends the mac address.
-        // note that this does an additional malloc that the queue consumer must free.
-        // note that log_print_buffer is copied into this new malloc()'d data, so, WE need to free it right after.
-        send_to_queue(generate_log_message_timestamp_and_device_id(false, 0, 0, log_print_buffer));
+    	// generate_log_message_timestamp_and_device_id() made an additional copy of this data, so, we should free this ourselves now.
+    	free(log_print_buffer);
+    	log_print_buffer = NULL;
 
-        // generate_log_message_timestamp_and_device_id() does an additional copy of this data, so, we should free this ourselves.
-        free(log_print_buffer);
+    	// if queued, queue consumer is responsible for free()'ing our string.
+    	// if not, we need to free() it ourselves here.
+        if (send_to_queue(final_log_message) != ESP_OK)
+        {
+	        free(final_log_message);
+        	final_log_message = NULL;
+        }
     }
 
     // ---------------------------

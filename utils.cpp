@@ -25,6 +25,7 @@ void utils_get_mac_address(char *formatted_mac_address)  // provide at least 18 
 char* generate_log_message_timestamp_and_device_id(bool print_timestamp, uint8_t log_level, uint32_t timestamp, char* log_message)
 {
     if (s_print_device_id && s_device_id == nullptr) {
+        // one-time generate device_id via static var.
         // for now, use mac address. in future, can be made configurable.
         s_device_id = (char*)malloc(18); // TODO: free somewhere if we care
         assert(s_device_id);
