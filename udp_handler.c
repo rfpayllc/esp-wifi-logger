@@ -49,7 +49,7 @@ bool init_udp_network_manager(struct logger_udp_network_data* nm, const char* ho
     struct hostent *server;
     server = gethostbyname(host);
     if (server == NULL) {
-        printf("%s: No such host known", TAG);
+        printf("%s: No such host known\n", TAG);
         return false;
     }
 
@@ -63,11 +63,11 @@ bool init_udp_network_manager(struct logger_udp_network_data* nm, const char* ho
 	nm->sock = socket(nm->addr_family, SOCK_DGRAM, nm->ip_protocol);
 	if (nm->sock < 0)
 	{
-		printf("%s: Unable to create socket: errno %d", TAG, errno);
+		printf("%s: Unable to create socket: errno %d\n", TAG, errno);
         return false;
 	}
 
-    printf("%s: Socket created, connected to %s:%d", TAG, host, port);
+    printf("%s: Socket created, connected to %s:%d\n", TAG, host, port);
     return true;
 }
 
@@ -90,12 +90,12 @@ void send_udp_data(struct logger_udp_network_data* nm, char* payload, int* len_s
 	{
         // 118 = no network is available. we'll silently ignore it to prevent spamming
         if (errno != 118) {
-            printf("%s: Error occurred during sending: errno %d", TAG, errno);
+            printf("%s: Error occurred during sending: errno=%d\n", TAG, errno);
         }
 	}
 	else
 	{
-        // printf("%s: Log msg sent via UDP", TAG); // very spammy
+        // printf("%s: Log msg sent via UDP\n", TAG); // very spammy
 	}
 
     if (len_sent)
