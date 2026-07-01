@@ -6,10 +6,15 @@ extern "C" {
 #endif
 
 
+// big enough for a MAC string "xx:xx:xx:xx:xx:xx" (17+null); has headroom for a
+// caller-supplied id.
+#define DEVICE_ID_SIZE 32
+
 struct wifi_logger_config {
     char host[128];
     int port;
     bool route_esp_idf_api_logs_to_wifi;
+    char device_id[DEVICE_ID_SIZE]; // if empty string, defaults to the efuse MAC address
 };
 
 #define wifi_log_e(TAG, fmt, ...) generate_log_message(ESP_LOG_ERROR, TAG, __LINE__, __func__, fmt, __VA_ARGS__)

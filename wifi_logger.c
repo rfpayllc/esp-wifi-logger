@@ -28,7 +28,7 @@ static const char* TAG = "wifi_logger";
 static bool s_print_device_id = true; // TODO: set from config
 
 static volatile bool s_wifi_logging_sending_enabled = true;
-static char s_device_id[18] = {}; // set to mac address at start.
+static char s_device_id[DEVICE_ID_SIZE] = {}; // set from config->device_id (or the efuse MAC) at start.
 
 const char* udp_logging_get_device_id() {
 	// either the mac address, or null-terminated zero-len str
@@ -521,6 +521,7 @@ bool set_wifi_logger_config(struct wifi_logger_config* config, const char* host,
     strcpy(config->host, host);
     config->port = port;
     config->route_esp_idf_api_logs_to_wifi = route_esp_idf_api_logs_to_wifi;
+    config->device_id[0] = '\0'; // default: empty => use the efuse MAC. Caller may set it after this.
 
     return true;
 }
@@ -541,7 +542,12 @@ bool start_wifi_logger(const struct wifi_logger_config* config)
 	    return false;
     }
 
-	utils_get_mac_address(s_device_id);
+	// device id: use the caller-supplied one, or default to the efuse MAC if empty.
+	assert(strlen(config->device_id) < DEVICE_ID_SIZE);
+	if (strlen(config->device_id) == 0)
+		utils_get_mac_address(s_device_id);
+	else
+		strcpy(s_device_id, config->device_id);
 
     // make a copy to pass in
     struct wifi_logger_config* config_copy = malloc(sizeof(struct wifi_logger_config));

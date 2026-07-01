@@ -71,6 +71,7 @@ wifi_log_v() - Generate log with log level VERBOSE
 * Example: `wifi_log(TAG, "%s", "logger test");`
 * `ESP_LOGE, ESP_LOGW, ESP_LOGI, ESP_LOGD, ESP_LOGV` logs will also be sent over wifi, if configured in menuconfig.
 * Call `start_wifi_logger()` in `void app_main()` to start the logger. Logging function `wifi_log_x() (x = e,w,i,d,v)` can be called to log messages or normal ESP-IDF Logging API functions like `ESP_LOGW` can be used if configured through `menuconfig`.
+* Each log line is tagged with a device id. Set `config.device_id` (max `DEVICE_ID_SIZE` chars) before `start_wifi_logger()` to choose it; leave it empty to default to the device's efuse MAC address.
 
 * Configure `menuconfig`
   * `Example Connection Configuration` *Set WiFi SSID and password*
